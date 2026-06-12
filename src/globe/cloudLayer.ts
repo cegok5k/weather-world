@@ -41,7 +41,14 @@ export function createCloudLayer(globe: GlobeInstance) {
     material?.dispose();
 
     sampleWind = buildWindField(points);
-    const visible = points.filter((p) => p.cover > 40);
+    // Sparse chunky deck like the reference art: only solidly overcast cells
+    // get a cloud, and dense areas are thinned with a stable hash so the deck
+    // stays readable while still tracking real coverage.
+    const visible = points.filter((p) => {
+      if (p.cover < 65) return false;
+      const h = Math.abs(Math.sin(p.lat * 91.17 + p.lon * 47.71) * 43758.5453) % 1;
+      return h < 0.55;
+    });
     const R = globe.getGlobeRadius();
 
     groupsInst = Array.from({ length: VARIANTS }, () => []);
@@ -51,7 +58,7 @@ export function createCloudLayer(globe: GlobeInstance) {
       groupsInst[i % VARIANTS].push({
         lat: p.lat,
         lon: p.lon,
-        scale: R * 0.034 * (0.6 + (p.cover / 100) * 1.0),
+        scale: R * 0.046 * (0.6 + (p.cover / 100) * 1.0),
         stretchX: 0.85 + h * 0.45,
         stretchZ: 0.85 + ((h * 7) % 1) * 0.35,
         heading: 0,

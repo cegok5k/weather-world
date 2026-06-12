@@ -16,9 +16,10 @@ function ramp(stops: Stop[], t: number): Stop {
   return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
 }
 
-// Stylize the NASA Blue Marble into saturated tonal ramps (not flat posterize):
-// keeps a hand-painted game look while preserving terrain depth. Also emits a
-// specular mask so oceans get a modern stylized sheen and land stays matte.
+// Stylize the NASA Blue Marble into a Fortnite-style painted look: saturated
+// tonal ramps, and a bright cyan shallow-water halo around every coastline
+// (computed by blurring the land mask). Also emits a specular mask so oceans
+// get a stylized sheen and land stays matte.
 async function makeStylizedEarthTextures(): Promise<{ map: HTMLCanvasElement; spec: HTMLCanvasElement }> {
   const img = new Image();
   img.src = `${import.meta.env.BASE_URL}textures/earth-blue-marble.jpg`;
@@ -43,22 +44,23 @@ async function makeStylizedEarthTextures(): Promise<{ map: HTMLCanvasElement; sp
   const px = data.data;
 
   const OCEAN: Stop[] = [
-    [16, 64, 128],
-    [26, 105, 180],
-    [52, 144, 218],
-    [92, 182, 240],
+    [14, 92, 176],
+    [28, 130, 212],
+    [56, 168, 236],
+    [118, 212, 250],
   ];
+  const SHALLOW: Stop = [132, 228, 252];
   const LAND: Stop[] = [
-    [44, 116, 62],
-    [78, 162, 76],
-    [132, 198, 88],
-    [188, 230, 122],
+    [40, 122, 58],
+    [80, 170, 72],
+    [140, 206, 86],
+    [196, 234, 124],
   ];
   const DESERT: Stop[] = [
-    [150, 102, 54],
-    [196, 142, 78],
-    [232, 190, 120],
-    [248, 226, 168],
+    [168, 112, 52],
+    [214, 158, 80],
+    [240, 200, 118],
+    [252, 232, 168],
   ];
   const ICE: Stop[] = [
     [196, 218, 238],
@@ -67,24 +69,80 @@ async function makeStylizedEarthTextures(): Promise<{ map: HTMLCanvasElement; sp
     [255, 255, 255],
   ];
 
-  for (let i = 0; i < px.length; i += 4) {
+  // Pass 1: classify each pixel and build the land mask
+  const n = w * h;
+  const cls = new Uint8Array(n); // 0 ocean, 1 land, 2 desert, 3 ice
+  const lums = new Float32Array(n);
+  const mask = document.createElement('canvas');
+  mask.width = w;
+  mask.height = h;
+  const mctx = mask.getContext('2d')!;
+  const maskData = mctx.createImageData(w, h);
+  const mp = maskData.data;
+
+  for (let j = 0; j < n; j++) {
+    const i = j * 4;
     const r = px[i];
     const g = px[i + 1];
     const b = px[i + 2];
     const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    lums[j] = lum;
+    let land = 255;
+    if (b > g + 8 && b > r + 8) {
+      cls[j] = 0;
+      land = 0;
+    } else if (r > 200 && g > 200 && b > 200) {
+      cls[j] = 3;
+    } else if (r > g + 15 && lum > 0.3) {
+      cls[j] = 2;
+    } else {
+      cls[j] = 1;
+    }
+    mp[i] = land;
+    mp[i + 1] = land;
+    mp[i + 2] = land;
+    mp[i + 3] = 255;
+  }
+  mctx.putImageData(maskData, 0, 0);
 
+  // Blur the land mask — blurred intensity over ocean = proximity to a coast
+  const blurCanvas = document.createElement('canvas');
+  blurCanvas.width = w;
+  blurCanvas.height = h;
+  const bctx = blurCanvas.getContext('2d', { willReadFrequently: true })!;
+  bctx.filter = 'blur(14px)';
+  bctx.drawImage(mask, 0, 0);
+  const bm = bctx.getImageData(0, 0, w, h).data;
+
+  // Pass 2: paint
+  for (let j = 0; j < n; j++) {
+    const i = j * 4;
+    const lum = lums[j];
     let c: Stop;
     let shiny = 0;
-    if (b > g + 8 && b > r + 8) {
-      c = ramp(OCEAN, lum * 2.6);
-      shiny = 235;
-    } else if (r > 200 && g > 200 && b > 200) {
-      c = ramp(ICE, (lum - 0.6) * 2.5);
-      shiny = 90;
-    } else if (r > g + 15 && lum > 0.3) {
-      c = ramp(DESERT, lum * 1.5);
-    } else {
-      c = ramp(LAND, lum * 2.8);
+    switch (cls[j]) {
+      case 0: {
+        c = ramp(OCEAN, lum * 2.6);
+        // Coastal glow: blend toward bright cyan near land
+        const t = Math.min((bm[i] / 255) * 1.6, 1);
+        const e = t * t;
+        c = [
+          c[0] + (SHALLOW[0] - c[0]) * e,
+          c[1] + (SHALLOW[1] - c[1]) * e,
+          c[2] + (SHALLOW[2] - c[2]) * e,
+        ];
+        shiny = 235;
+        break;
+      }
+      case 3:
+        c = ramp(ICE, (lum - 0.6) * 2.5);
+        shiny = 90;
+        break;
+      case 2:
+        c = ramp(DESERT, lum * 1.5);
+        break;
+      default:
+        c = ramp(LAND, lum * 2.8);
     }
     px[i] = c[0];
     px[i + 1] = c[1];
@@ -97,6 +155,47 @@ async function makeStylizedEarthTextures(): Promise<{ map: HTMLCanvasElement; sp
   ctx.putImageData(data, 0, 0);
   sctx.putImageData(specData, 0, 0);
   return { map: canvas, spec: specCanvas };
+}
+
+// Soft purple nebula sprites scattered behind the stars
+function makeNebulae(): THREE.Group {
+  const group = new THREE.Group();
+  const palette = ['#7b3fd4', '#a44fd0', '#3f5fd4', '#d44f9e'];
+  const texCanvas = document.createElement('canvas');
+  texCanvas.width = 256;
+  texCanvas.height = 256;
+  const tctx = texCanvas.getContext('2d')!;
+  const grad = tctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+  grad.addColorStop(0, 'rgba(255,255,255,0.55)');
+  grad.addColorStop(0.4, 'rgba(255,255,255,0.18)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  tctx.fillStyle = grad;
+  tctx.fillRect(0, 0, 256, 256);
+  const tex = new THREE.CanvasTexture(texCanvas);
+
+  for (let i = 0; i < 7; i++) {
+    const mat = new THREE.SpriteMaterial({
+      map: tex,
+      color: new THREE.Color(palette[i % palette.length]),
+      transparent: true,
+      opacity: 0.16 + Math.random() * 0.1,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    const r = 2800;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    sprite.position.set(
+      r * Math.sin(phi) * Math.cos(theta),
+      r * Math.sin(phi) * Math.sin(theta),
+      r * Math.cos(phi),
+    );
+    const s = 1400 + Math.random() * 1400;
+    sprite.scale.set(s, s, 1);
+    group.add(sprite);
+  }
+  return group;
 }
 
 // Deep-space backdrop: vertical gradient sphere instead of a flat color
@@ -157,7 +256,7 @@ function makeFresnelRim(radius: number): THREE.Mesh {
     transparent: true,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
-    uniforms: { rimColor: { value: new THREE.Color('#54b6ff') } },
+    uniforms: { rimColor: { value: new THREE.Color('#58dcff') } },
     vertexShader: `varying vec3 vN; varying vec3 vV;
       void main(){
         vN = normalize(normalMatrix * normal);
@@ -167,8 +266,8 @@ function makeFresnelRim(radius: number): THREE.Mesh {
       }`,
     fragmentShader: `uniform vec3 rimColor; varying vec3 vN; varying vec3 vV;
       void main(){
-        float f = pow(1.0 - abs(dot(vN, vV)), 3.5);
-        gl_FragColor = vec4(rimColor, f * 0.85);
+        float f = pow(1.0 - abs(dot(vN, vV)), 2.8);
+        gl_FragColor = vec4(rimColor, f * 1.05);
       }`,
   });
   return new THREE.Mesh(new THREE.SphereGeometry(radius * 1.004, 64, 64), mat);
@@ -180,8 +279,8 @@ export async function createGlobe(container: HTMLElement) {
   globe
     .backgroundColor('rgba(0,0,0,0)')
     .showAtmosphere(true)
-    .atmosphereColor('#5fb8ff')
-    .atmosphereAltitude(0.2)
+    .atmosphereColor('#4fd6ff')
+    .atmosphereAltitude(0.26)
     .bumpImageUrl(`${import.meta.env.BASE_URL}textures/earth-topology.png`)
     .pointOfView({ lat: 25, lng: 10, altitude: 2.2 }, 0);
 
@@ -197,6 +296,7 @@ export async function createGlobe(container: HTMLElement) {
   globe.lights([ambient, key, fill]);
 
   globe.scene().add(makeSpaceBackdrop());
+  globe.scene().add(makeNebulae());
   globe.scene().add(makeStars());
   globe.scene().add(makeFresnelRim(globe.getGlobeRadius()));
 
