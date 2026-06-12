@@ -23,6 +23,18 @@ export function toonMaterial(color: number | string, opts: Partial<THREE.MeshToo
   });
 }
 
+// Soft airbrushed cloud shading: smooth lambert falloff (no toon bands) with
+// a cool emissive lift so shadowed sides stay bright instead of going grey.
+export function cloudMaterial(color: number | string = '#ffffff', opts: Partial<THREE.MeshLambertMaterialParameters> = {}): THREE.MeshLambertMaterial {
+  return new THREE.MeshLambertMaterial({
+    color,
+    emissive: new THREE.Color('#7888b8'),
+    emissiveIntensity: 0.42,
+    vertexColors: true,
+    ...opts,
+  });
+}
+
 // Low-poly fluffy cloud: a few squashed icospheres merged into one geometry.
 export function makeCloudGeometry(seed = 1): THREE.BufferGeometry {
   // Cheap deterministic pseudo-random so clouds vary but are stable per seed
@@ -52,13 +64,12 @@ export function makeCloudGeometry(seed = 1): THREE.BufferGeometry {
   mc.addBall(headX + 0.12, 0.68, 0.52, 1.8 + rnd() * 0.6, sub);
   // long tapering tail to one side, short stub to the other
   const dir = rnd() > 0.5 ? 1 : -1;
-  mc.addBall(headX + dir * 0.28, 0.46, 0.5 + (rnd() - 0.5) * 0.06, 2.2, sub);
-  mc.addBall(headX + dir * 0.43, 0.44, 0.5 + (rnd() - 0.5) * 0.05, 1.1, sub);
-  mc.addBall(headX + dir * 0.54, 0.43, 0.5 + (rnd() - 0.5) * 0.04, 0.45, sub);
-  mc.addBall(headX - dir * 0.26, 0.45, 0.5 + (rnd() - 0.5) * 0.06, 1.9, sub);
-  mc.addBall(headX - dir * 0.4, 0.435, 0.5, 0.8, sub);
+  mc.addBall(headX + dir * 0.26, 0.475, 0.5 + (rnd() - 0.5) * 0.06, 2.4, sub);
+  mc.addBall(headX + dir * 0.42, 0.465, 0.5 + (rnd() - 0.5) * 0.05, 1.2, sub);
+  mc.addBall(headX - dir * 0.25, 0.47, 0.5 + (rnd() - 0.5) * 0.06, 2.1, sub);
+  mc.addBall(headX - dir * 0.38, 0.46, 0.5, 0.9, sub);
   // depth puff so it's not paper-thin from the front
-  mc.addBall(headX + (rnd() - 0.5) * 0.12, 0.5, 0.68, 2.0, sub);
+  mc.addBall(headX + (rnd() - 0.5) * 0.12, 0.5, 0.68, 2.2, sub);
 
   mc.update();
 
@@ -75,9 +86,9 @@ export function makeCloudGeometry(seed = 1): THREE.BufferGeometry {
   let maxY = 0;
   for (let i = 0; i < vertCount; i++) {
     let y = pos[i * 3 + 1];
-    if (y < 0) y *= 0.55;
-    pos[i * 3] *= 1.2;
-    pos[i * 3 + 1] = y * 1.15;
+    if (y < 0) y *= 0.6;
+    pos[i * 3] *= 1.1;
+    pos[i * 3 + 1] = y * 1.2;
     pos[i * 3 + 2] *= 1.05;
     if (y > maxY) maxY = y;
   }

@@ -2,36 +2,42 @@ import * as THREE from 'three';
 import type { GlobeInstance } from 'globe.gl';
 import type { CloudPoint } from '../api/cloudGrid';
 import { buildWindField, type WindSample } from '../lib/windField';
-import { makeCloudGeometry, toonMaterial } from './toonMaterials';
+import { makeCloudGeometry, cloudMaterial } from './toonMaterials';
 
 // Visual exaggeration: degrees of drift per second per km/h of real wind.
-// 20 km/h wind ≈ 0.09°/s — a slow, watchable crawl that matches relative speeds.
-const DRIFT_FACTOR = 0.0045;
+// 20 km/h ≈ 0.22°/s — clearly watchable, and relative speeds stay true.
+const DRIFT_FACTOR = 0.011;
+const ALTITUDE = 0.085; // clouds float visibly above the surface
 
 interface CloudInst {
   lat: number;
   lon: number;
+  homeLat: number; // live-data grid cell this cloud belongs to
+  homeLon: number;
   scale: number;
-  stretchX: number; // per-cloud non-uniform stretch for silhouette variety
-  stretchZ: number;
-  heading: number; // radians, faces direction of travel
+  age: number;
+  lifetime: number;
 }
 
-// Global layer of fluffy toon clouds, one InstancedMesh, driven by real
-// cloud-cover data; clouds advect through the live wind field, so they
-// curve along trade winds and westerlies instead of moving in straight lines.
+// Global cloud deck driven by live data: clouds spawn at observed-coverage
+// cells, get stretched into streaks by strong winds (calm air keeps them
+// round), advect through the interpolated wind field, then fade out and
+// respawn at their data cell so coverage keeps tracking reality.
 export function createCloudLayer(globe: GlobeInstance) {
   const group = new THREE.Group();
   globe.scene().add(group);
 
-  const VARIANTS = 3; // distinct cloud shapes so the deck doesn't look copy-pasted
+  const VARIANTS = 3;
   let meshes: THREE.InstancedMesh[] = [];
   let groupsInst: CloudInst[][] = [];
-  let material: THREE.MeshToonMaterial | null = null;
+  let material: THREE.MeshLambertMaterial | null = null;
   let sampleWind: ((lat: number, lon: number) => WindSample) | null = null;
   const dummy = new THREE.Object3D();
   const up = new THREE.Vector3(0, 1, 0);
   const radial = new THREE.Vector3();
+  const forward = new THREE.Vector3();
+  const side = new THREE.Vector3();
+  const basis = new THREE.Matrix4();
 
   function setData(points: CloudPoint[]) {
     for (const m of meshes) {
@@ -41,9 +47,8 @@ export function createCloudLayer(globe: GlobeInstance) {
     material?.dispose();
 
     sampleWind = buildWindField(points);
-    // Sparse chunky deck like the reference art: only solidly overcast cells
-    // get a cloud, and dense areas are thinned with a stable hash so the deck
-    // stays readable while still tracking real coverage.
+    // Sparse chunky deck: only solidly overcast cells get a cloud, thinned
+    // with a stable hash so the deck stays readable but tracks coverage.
     const visible = points.filter((p) => {
       if (p.cover < 65) return false;
       const h = Math.abs(Math.sin(p.lat * 91.17 + p.lon * 47.71) * 43758.5453) % 1;
@@ -53,19 +58,19 @@ export function createCloudLayer(globe: GlobeInstance) {
 
     groupsInst = Array.from({ length: VARIANTS }, () => []);
     visible.forEach((p, i) => {
-      // Stable pseudo-random stretch per point for silhouette variety
       const h = Math.abs(Math.sin(p.lat * 12.9898 + p.lon * 78.233) * 43758.5453) % 1;
       groupsInst[i % VARIANTS].push({
         lat: p.lat,
         lon: p.lon,
-        scale: R * 0.058 * (0.6 + (p.cover / 100) * 1.0),
-        stretchX: 0.85 + h * 0.45,
-        stretchZ: 0.85 + ((h * 7) % 1) * 0.35,
-        heading: 0,
+        homeLat: p.lat,
+        homeLon: p.lon,
+        scale: R * 0.055 * (0.6 + (p.cover / 100) * 1.0),
+        age: h * 50, // desynchronize lifecycles
+        lifetime: 50 + h * 25,
       });
     });
 
-    material = toonMaterial('#ffffff', { transparent: true, opacity: 1, vertexColors: true });
+    material = cloudMaterial('#ffffff', { transparent: true, opacity: 1 });
     meshes = groupsInst.map((insts, v) => {
       const m = new THREE.InstancedMesh(makeCloudGeometry(7 + v * 13), material!, insts.length);
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -82,6 +87,14 @@ export function createCloudLayer(globe: GlobeInstance) {
       const insts = groupsInst[v];
       for (let i = 0; i < insts.length; i++) {
         const inst = insts[i];
+        inst.age += dt;
+        if (inst.age >= inst.lifetime) {
+          // Respawn at the live-data cell so coverage stays anchored to reality
+          inst.age = 0;
+          inst.lat = inst.homeLat;
+          inst.lon = inst.homeLon;
+        }
+
         // Sample the field at the cloud's CURRENT position each frame, so the
         // trajectory bends with the global circulation.
         const w = sampleWind(inst.lat, inst.lon);
@@ -91,14 +104,40 @@ export function createCloudLayer(globe: GlobeInstance) {
         else if (inst.lon < -180) inst.lon += 360;
         if (inst.lat > 72) inst.lat = 72;
         else if (inst.lat < -72) inst.lat = -72;
-        inst.heading = -Math.atan2(w.u, w.v);
 
-        const { x, y, z } = globe.getCoords(inst.lat, inst.lon, 0.06);
+        // Wind shapes the cloud: strong wind stretches it into a streak along
+        // its travel direction; calm air keeps it round and tall.
+        const speed = Math.hypot(w.u, w.v); // km/h
+        const stretch = 1 + Math.min(speed / 45, 1) * 0.9;
+        const flatten = 1 / (1 + Math.min(speed / 45, 1) * 0.35);
+
+        // Lifecycle envelope: grow in, shrink out (instances can't fade alone)
+        const fadeIn = Math.min(inst.age / 4, 1);
+        const fadeOut = Math.min((inst.lifetime - inst.age) / 4, 1);
+        const env0 = Math.min(fadeIn, fadeOut);
+        const env = env0 * env0 * (3 - 2 * env0);
+
+        const { x, y, z } = globe.getCoords(inst.lat, inst.lon, ALTITUDE);
         dummy.position.set(x, y, z);
         radial.set(x, y, z).normalize();
-        dummy.quaternion.setFromUnitVectors(up, radial);
-        dummy.rotateY(inst.heading);
-        dummy.scale.set(inst.scale * inst.stretchX, inst.scale, inst.scale * inst.stretchZ);
+
+        if (speed > 1) {
+          // Orient the long axis (local X) along the actual travel direction:
+          // sample a point slightly downwind and build an orthonormal basis.
+          const aheadLat = inst.lat + w.v * 0.02;
+          const aheadLon = inst.lon + (w.u * 0.02) / Math.max(Math.cos((inst.lat * Math.PI) / 180), 0.2);
+          const ahead = globe.getCoords(aheadLat, aheadLon, ALTITUDE);
+          forward.set(ahead.x - x, ahead.y - y, ahead.z - z).normalize();
+          side.crossVectors(forward, radial).normalize();
+          forward.crossVectors(radial, side); // re-orthogonalize
+          basis.makeBasis(forward, radial, side);
+          dummy.quaternion.setFromRotationMatrix(basis);
+        } else {
+          dummy.quaternion.setFromUnitVectors(up, radial);
+        }
+
+        const s = inst.scale * env;
+        dummy.scale.set(s * stretch, s * flatten, s);
         dummy.updateMatrix();
         mesh.setMatrixAt(i, dummy.matrix);
       }

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { GlobeInstance } from 'globe.gl';
 import type { EffectKind } from '../lib/wmo';
-import { makeCloudGeometry, toonMaterial } from './toonMaterials';
+import { cloudMaterial, makeCloudGeometry, toonMaterial } from './toonMaterials';
 
 // Local toony weather effects anchored above the selected location.
 // One active effect group at a time; built in local space with +Y = away from globe center.
@@ -78,7 +78,7 @@ export function createWeatherEffects(globe: GlobeInstance) {
     for (let i = 0; i < count; i++) {
       const cloud = new THREE.Mesh(
         makeCloudGeometry(11 + i * 3),
-        toonMaterial(opts.dark ? '#9aa4b5' : '#ffffff', { vertexColors: true }),
+        cloudMaterial(opts.dark ? '#aab3c4' : '#ffffff'),
       );
       const s = S * (0.45 + (i % 2) * 0.15);
       cloud.scale.set(s, s, s);
@@ -181,7 +181,7 @@ export function createWeatherEffects(globe: GlobeInstance) {
     for (let i = 0; i < 3; i++) {
       const fog = new THREE.Mesh(
         makeCloudGeometry(31 + i * 5),
-        toonMaterial('#cfd8dc', { transparent: true, opacity: 0.55, vertexColors: true }),
+        cloudMaterial('#cfd8dc', { transparent: true, opacity: 0.55 }),
       );
       const s = S * (0.7 + i * 0.12);
       fog.scale.set(s, s * 0.4, s);
