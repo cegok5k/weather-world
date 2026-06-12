@@ -78,7 +78,7 @@ export function createWeatherEffects(globe: GlobeInstance) {
     for (let i = 0; i < count; i++) {
       const cloud = new THREE.Mesh(
         makeCloudGeometry(11 + i * 3),
-        toonMaterial(opts.dark ? '#9aa4b5' : '#ffffff'),
+        toonMaterial(opts.dark ? '#9aa4b5' : '#ffffff', { vertexColors: true }),
       );
       const s = S * (0.45 + (i % 2) * 0.15);
       cloud.scale.set(s, s, s);
@@ -181,7 +181,7 @@ export function createWeatherEffects(globe: GlobeInstance) {
     for (let i = 0; i < 3; i++) {
       const fog = new THREE.Mesh(
         makeCloudGeometry(31 + i * 5),
-        toonMaterial('#cfd8dc', { transparent: true, opacity: 0.55 }),
+        toonMaterial('#cfd8dc', { transparent: true, opacity: 0.55, vertexColors: true }),
       );
       const s = S * (0.7 + i * 0.12);
       fog.scale.set(s, s * 0.4, s);

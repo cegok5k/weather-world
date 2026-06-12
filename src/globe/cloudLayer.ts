@@ -12,6 +12,8 @@ interface CloudInst {
   lat: number;
   lon: number;
   scale: number;
+  stretchX: number; // per-cloud non-uniform stretch for silhouette variety
+  stretchZ: number;
   heading: number; // radians, faces direction of travel
 }
 
@@ -22,64 +24,79 @@ export function createCloudLayer(globe: GlobeInstance) {
   const group = new THREE.Group();
   globe.scene().add(group);
 
-  let mesh: THREE.InstancedMesh | null = null;
-  let instances: CloudInst[] = [];
+  const VARIANTS = 3; // distinct cloud shapes so the deck doesn't look copy-pasted
+  let meshes: THREE.InstancedMesh[] = [];
+  let groupsInst: CloudInst[][] = [];
+  let material: THREE.MeshToonMaterial | null = null;
   let sampleWind: ((lat: number, lon: number) => WindSample) | null = null;
   const dummy = new THREE.Object3D();
   const up = new THREE.Vector3(0, 1, 0);
   const radial = new THREE.Vector3();
 
   function setData(points: CloudPoint[]) {
-    if (mesh) {
-      group.remove(mesh);
-      mesh.geometry.dispose();
-      (mesh.material as THREE.Material).dispose();
+    for (const m of meshes) {
+      group.remove(m);
+      m.geometry.dispose();
     }
+    material?.dispose();
 
     sampleWind = buildWindField(points);
     const visible = points.filter((p) => p.cover > 40);
     const R = globe.getGlobeRadius();
 
-    instances = visible.map((p) => ({
-      lat: p.lat,
-      lon: p.lon,
-      scale: R * 0.034 * (0.6 + (p.cover / 100) * 1.0),
-      heading: 0,
-    }));
+    groupsInst = Array.from({ length: VARIANTS }, () => []);
+    visible.forEach((p, i) => {
+      // Stable pseudo-random stretch per point for silhouette variety
+      const h = Math.abs(Math.sin(p.lat * 12.9898 + p.lon * 78.233) * 43758.5453) % 1;
+      groupsInst[i % VARIANTS].push({
+        lat: p.lat,
+        lon: p.lon,
+        scale: R * 0.034 * (0.6 + (p.cover / 100) * 1.0),
+        stretchX: 0.85 + h * 0.45,
+        stretchZ: 0.85 + ((h * 7) % 1) * 0.35,
+        heading: 0,
+      });
+    });
 
-    const geo = makeCloudGeometry(7);
-    const mat = toonMaterial('#ffffff', { transparent: true, opacity: 0.95 });
-    mesh = new THREE.InstancedMesh(geo, mat, instances.length);
-    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    group.add(mesh);
+    material = toonMaterial('#ffffff', { transparent: true, opacity: 0.95, vertexColors: true });
+    meshes = groupsInst.map((insts, v) => {
+      const m = new THREE.InstancedMesh(makeCloudGeometry(7 + v * 13), material!, insts.length);
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      group.add(m);
+      return m;
+    });
     advect(0);
   }
 
   function advect(dt: number) {
-    if (!mesh || !sampleWind) return;
-    for (let i = 0; i < instances.length; i++) {
-      const inst = instances[i];
-      // Sample the field at the cloud's CURRENT position each frame, so the
-      // trajectory bends with the global circulation.
-      const w = sampleWind(inst.lat, inst.lon);
-      inst.lat += w.v * DRIFT_FACTOR * dt;
-      inst.lon += ((w.u * DRIFT_FACTOR) / Math.max(Math.cos((inst.lat * Math.PI) / 180), 0.2)) * dt;
-      if (inst.lon > 180) inst.lon -= 360;
-      else if (inst.lon < -180) inst.lon += 360;
-      if (inst.lat > 72) inst.lat = 72;
-      else if (inst.lat < -72) inst.lat = -72;
-      inst.heading = -Math.atan2(w.u, w.v);
+    if (!sampleWind) return;
+    for (let v = 0; v < meshes.length; v++) {
+      const mesh = meshes[v];
+      const insts = groupsInst[v];
+      for (let i = 0; i < insts.length; i++) {
+        const inst = insts[i];
+        // Sample the field at the cloud's CURRENT position each frame, so the
+        // trajectory bends with the global circulation.
+        const w = sampleWind(inst.lat, inst.lon);
+        inst.lat += w.v * DRIFT_FACTOR * dt;
+        inst.lon += ((w.u * DRIFT_FACTOR) / Math.max(Math.cos((inst.lat * Math.PI) / 180), 0.2)) * dt;
+        if (inst.lon > 180) inst.lon -= 360;
+        else if (inst.lon < -180) inst.lon += 360;
+        if (inst.lat > 72) inst.lat = 72;
+        else if (inst.lat < -72) inst.lat = -72;
+        inst.heading = -Math.atan2(w.u, w.v);
 
-      const { x, y, z } = globe.getCoords(inst.lat, inst.lon, 0.06);
-      dummy.position.set(x, y, z);
-      radial.set(x, y, z).normalize();
-      dummy.quaternion.setFromUnitVectors(up, radial);
-      dummy.rotateY(inst.heading);
-      dummy.scale.setScalar(inst.scale);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
+        const { x, y, z } = globe.getCoords(inst.lat, inst.lon, 0.06);
+        dummy.position.set(x, y, z);
+        radial.set(x, y, z).normalize();
+        dummy.quaternion.setFromUnitVectors(up, radial);
+        dummy.rotateY(inst.heading);
+        dummy.scale.set(inst.scale * inst.stretchX, inst.scale, inst.scale * inst.stretchZ);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
     }
-    mesh.instanceMatrix.needsUpdate = true;
   }
 
   let targetOpacity = 0.95;
@@ -92,11 +109,11 @@ export function createCloudLayer(globe: GlobeInstance) {
       targetOpacity = alt > 1.1 ? 0.95 : alt < 0.75 ? 0 : ((alt - 0.75) / 0.35) * 0.95;
     },
     tick(dt: number) {
-      if (!mesh) return;
-      const mat = mesh.material as THREE.MeshToonMaterial;
-      mat.opacity += (targetOpacity - mat.opacity) * Math.min(dt * 4, 1);
-      mesh.visible = mat.opacity > 0.02;
-      if (mesh.visible) advect(dt);
+      if (!material || meshes.length === 0) return;
+      material.opacity += (targetOpacity - material.opacity) * Math.min(dt * 4, 1);
+      const show = material.opacity > 0.02;
+      for (const m of meshes) m.visible = show;
+      if (show) advect(dt);
     },
   };
 }

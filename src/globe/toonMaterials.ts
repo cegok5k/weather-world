@@ -31,30 +31,54 @@ export function makeCloudGeometry(seed = 1): THREE.BufferGeometry {
     return (s - 1) / 2147483646;
   };
 
-  // Classic cartoon cloud: a row of rounded mounds with a flat base.
-  // [x, y, z, radius] — center mound biggest, sides taper, one behind for depth.
-  const mounds: Array<[number, number, number, number]> = [
-    [0, 0.4, 0, 1.0],
-    [-0.95, 0.22, 0.05, 0.72 + rnd() * 0.08],
-    [0.95, 0.25, -0.05, 0.76 + rnd() * 0.08],
-    [0.15, 0.35, -0.6, 0.6 + rnd() * 0.08],
-    [-0.35, 0.3, 0.55, 0.58 + rnd() * 0.08],
-  ];
+  // Stylized game-style cloud: an irregular cluster of smooth puffs with a
+  // softly squashed base, organic vertex jitter and white-top / dusty-blue
+  // underside vertex shading.
   const geos: THREE.BufferGeometry[] = [];
-  for (const [x, y, z, r] of mounds) {
+  const center = new THREE.IcosahedronGeometry(1.0, 2);
+  center.translate(0, 0.28, 0);
+  geos.push(center);
+  const puffs = 5 + Math.floor(rnd() * 3);
+  for (let i = 0; i < puffs; i++) {
+    const a = (i / puffs) * Math.PI * 2 + rnd() * 1.2;
+    const d = 0.55 + rnd() * 0.75;
+    const r = (0.4 + rnd() * 0.4) * (1.25 - d / 2.2);
     const g = new THREE.IcosahedronGeometry(r, 2);
-    g.translate(x, y, z);
+    g.translate(Math.cos(a) * d * 1.25, 0.12 + rnd() * 0.3, Math.sin(a) * d * 0.7);
     geos.push(g);
   }
   const merged = mergeGeometriesFlat(geos);
   geos.forEach((g) => g.dispose());
 
-  // Slice off everything below y=0 for the flat cartoon base
+  // Soft-squash the base (keeps roundness, no hard slice) + organic jitter.
+  // Sphere normals are kept as-is so shading stays smooth, not faceted.
   const pos = merged.attributes.position;
+  const nor = merged.attributes.normal;
+  let maxY = 0;
   for (let i = 0; i < pos.count; i++) {
-    if (pos.getY(i) < 0) pos.setY(i, 0);
+    let x = pos.getX(i);
+    let y = pos.getY(i);
+    let z = pos.getZ(i);
+    if (y < 0) y *= 0.32;
+    const wobble = Math.sin(x * 4.7 + z * 3.1) * Math.cos(y * 5.3 + x * 2.2) * 0.05;
+    x += nor.getX(i) * wobble;
+    y += nor.getY(i) * wobble;
+    z += nor.getZ(i) * wobble;
+    pos.setXYZ(i, x, y, z);
+    if (y > maxY) maxY = y;
   }
-  merged.computeVertexNormals();
+
+  // Vertex colors: white crowns fading to a dusty blue-grey underside
+  const colors = new Float32Array(pos.count * 3);
+  const bottom = { r: 0.72, g: 0.78, b: 0.88 };
+  for (let i = 0; i < pos.count; i++) {
+    const t = Math.min(Math.max((pos.getY(i) + 0.35) / (maxY + 0.35), 0), 1);
+    const e = t * t * (3 - 2 * t); // smoothstep
+    colors[i * 3] = bottom.r + (1 - bottom.r) * e;
+    colors[i * 3 + 1] = bottom.g + (1 - bottom.g) * e;
+    colors[i * 3 + 2] = bottom.b + (1 - bottom.b) * e;
+  }
+  merged.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   return merged;
 }
 
