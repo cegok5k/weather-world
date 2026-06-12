@@ -5,7 +5,7 @@ let gradientMap: THREE.DataTexture | null = null;
 
 export function getToonGradient(): THREE.DataTexture {
   if (!gradientMap) {
-    const data = new Uint8Array([110, 110, 110, 255, 190, 190, 190, 255, 255, 255, 255, 255]);
+    const data = new Uint8Array([150, 150, 150, 255, 218, 218, 218, 255, 255, 255, 255, 255]);
     gradientMap = new THREE.DataTexture(data, 3, 1, THREE.RGBAFormat);
     gradientMap.minFilter = THREE.NearestFilter;
     gradientMap.magFilter = THREE.NearestFilter;
