@@ -31,22 +31,30 @@ export function makeCloudGeometry(seed = 1): THREE.BufferGeometry {
     return (s - 1) / 2147483646;
   };
 
+  // Classic cartoon cloud: a row of rounded mounds with a flat base.
+  // [x, y, z, radius] — center mound biggest, sides taper, one behind for depth.
+  const mounds: Array<[number, number, number, number]> = [
+    [0, 0.4, 0, 1.0],
+    [-0.95, 0.22, 0.05, 0.72 + rnd() * 0.08],
+    [0.95, 0.25, -0.05, 0.76 + rnd() * 0.08],
+    [0.15, 0.35, -0.6, 0.6 + rnd() * 0.08],
+    [-0.35, 0.3, 0.55, 0.58 + rnd() * 0.08],
+  ];
   const geos: THREE.BufferGeometry[] = [];
-  // One big central puff with smaller ones clustered around it
-  const center = new THREE.IcosahedronGeometry(0.95, 1);
-  center.scale(1, 0.7, 1);
-  geos.push(center);
-  const satellites = 4;
-  for (let i = 0; i < satellites; i++) {
-    const r = 0.45 + rnd() * 0.3;
-    const a = (i / satellites) * Math.PI * 2 + rnd() * 0.8;
-    const g = new THREE.IcosahedronGeometry(r, 1);
-    g.translate(Math.cos(a) * (0.75 + rnd() * 0.25), (rnd() - 0.5) * 0.2 - 0.1, Math.sin(a) * (0.55 + rnd() * 0.2));
-    g.scale(1, 0.7, 1);
+  for (const [x, y, z, r] of mounds) {
+    const g = new THREE.IcosahedronGeometry(r, 2);
+    g.translate(x, y, z);
     geos.push(g);
   }
   const merged = mergeGeometriesFlat(geos);
   geos.forEach((g) => g.dispose());
+
+  // Slice off everything below y=0 for the flat cartoon base
+  const pos = merged.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    if (pos.getY(i) < 0) pos.setY(i, 0);
+  }
+  merged.computeVertexNormals();
   return merged;
 }
 

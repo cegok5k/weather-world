@@ -4,9 +4,11 @@ export interface CloudPoint {
   lat: number;
   lon: number;
   cover: number; // % 0-100
+  windSpeed: number; // km/h
+  windDir: number; // meteorological degrees (direction wind comes FROM)
 }
 
-const CACHE_KEY = 'weather-world-cloud-grid';
+const CACHE_KEY = 'weather-world-cloud-grid-v2';
 const TTL_MS = 30 * 60 * 1000;
 const CHUNK = 100;
 
@@ -40,7 +42,7 @@ export async function fetchCloudGrid(): Promise<CloudPoint[]> {
     const params = new URLSearchParams({
       latitude: chunk.map((p) => p.lat).join(','),
       longitude: chunk.map((p) => p.lon).join(','),
-      current: 'cloud_cover',
+      current: 'cloud_cover,wind_speed_10m,wind_direction_10m',
     });
     const res = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
     if (!res.ok) throw new Error(`Cloud grid API error ${res.status}`);
@@ -51,6 +53,8 @@ export async function fetchCloudGrid(): Promise<CloudPoint[]> {
         lat: chunk[j].lat,
         lon: chunk[j].lon,
         cover: loc?.current?.cloud_cover ?? 0,
+        windSpeed: loc?.current?.wind_speed_10m ?? 0,
+        windDir: loc?.current?.wind_direction_10m ?? 0,
       });
     });
   }
