@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Weather World</title>
+    <meta name="description" content="A toony 3D weather globe with live forecasts" />
+  </head>
+  <body>
+    <div id="globe"></div>
+
+    <header id="topbar">
+      <div id="brand">🌍 Weather World</div>
+      <div id="search-wrap">
+        <input id="search-input" type="text" placeholder="Search a city…" autocomplete="off" spellcheck="false" />
+        <button id="geo-btn" title="Use my location">📍</button>
+        <ul id="search-results" hidden></ul>
+      </div>
+      <button id="unit-toggle" title="Toggle units">°C</button>
+    </header>
+
+    <div id="hint">Search a city, hit 📍, or click anywhere on the globe</div>
+
+    <aside id="current-card" hidden></aside>
+    <section id="forecast-strip" hidden></section>
+
+    <div id="toast" hidden></div>
+    <div id="loading" hidden><div class="spinner"></div></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
