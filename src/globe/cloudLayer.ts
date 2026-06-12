@@ -58,14 +58,14 @@ export function createCloudLayer(globe: GlobeInstance) {
       groupsInst[i % VARIANTS].push({
         lat: p.lat,
         lon: p.lon,
-        scale: R * 0.046 * (0.6 + (p.cover / 100) * 1.0),
+        scale: R * 0.058 * (0.6 + (p.cover / 100) * 1.0),
         stretchX: 0.85 + h * 0.45,
         stretchZ: 0.85 + ((h * 7) % 1) * 0.35,
         heading: 0,
       });
     });
 
-    material = toonMaterial('#ffffff', { transparent: true, opacity: 0.95, vertexColors: true });
+    material = toonMaterial('#ffffff', { transparent: true, opacity: 1, vertexColors: true });
     meshes = groupsInst.map((insts, v) => {
       const m = new THREE.InstancedMesh(makeCloudGeometry(7 + v * 13), material!, insts.length);
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -106,14 +106,14 @@ export function createCloudLayer(globe: GlobeInstance) {
     }
   }
 
-  let targetOpacity = 0.95;
+  let targetOpacity = 1;
 
   return {
     setData,
     // Hide the deck entirely when the camera dives in so it never shades
     // the local weather view; bring it back as you zoom out.
     setCameraAltitude(alt: number) {
-      targetOpacity = alt > 1.1 ? 0.95 : alt < 0.75 ? 0 : ((alt - 0.75) / 0.35) * 0.95;
+      targetOpacity = alt > 1.1 ? 1 : alt < 0.75 ? 0 : (alt - 0.75) / 0.35;
     },
     tick(dt: number) {
       if (!material || meshes.length === 0) return;
